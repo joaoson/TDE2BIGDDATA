@@ -1,0 +1,122 @@
+package TDE2;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.GenericOptionsParser;
+import org.apache.log4j.BasicConfigurator;
+
+import java.io.IOException;
+
+public class MinMaxBrazil {
+
+    public static void main(String[] args) throws Exception {
+        BasicConfigurator.configure();
+
+        Configuration conf = new Configuration();
+        String[] files = new GenericOptionsParser(conf, args).getRemainingArgs();
+
+        Path input = new Path("in/operacoes_comerciais_inteira.csv");
+        Path output = new Path("output/Question6TDE.txt");
+
+        Job job = Job.getInstance(conf, "MINMAX");
+
+        job.setJarByClass(MinMaxBrazil.class);
+        job.setMapperClass(MINMAXBrazilMapper.class);
+        job.setReducerClass(MINMAXBrazilReducer.class);
+
+        job.setOutputKeyClass(Text.class);
+        job.setOutputValueClass(LongWritable.class);
+
+        FileInputFormat.addInputPath(job, input);
+        FileOutputFormat.setOutputPath(job, output);
+
+        if (job.waitForCompletion(true)) {
+            org.apache.hadoop.fs.FileSystem fs = org.apache.hadoop.fs.FileSystem.get(conf);
+
+            Path outputFile = new Path("output/Question6TDETEXT.txt");
+            org.apache.hadoop.fs.FSDataOutputStream out = fs.create(outputFile);
+
+            org.apache.hadoop.fs.FileStatus[] status = fs.listStatus(output,
+                    new org.apache.hadoop.fs.PathFilter() {
+                        public boolean accept(Path path) {
+                            return path.getName().startsWith("part-");
+                        }
+                    });
+
+            for (org.apache.hadoop.fs.FileStatus fileStatus : status) {
+                org.apache.hadoop.fs.FSDataInputStream in = fs.open(fileStatus.getPath());
+                org.apache.hadoop.io.IOUtils.copyBytes(in, out, conf, false);
+                in.close();
+            }
+
+            out.close();
+            System.exit(0);
+        } else {
+            System.exit(1);
+        }
+
+        System.exit(job.waitForCompletion(true) ? 0 : 1);
+    }
+
+    public static class MINMAXBrazilMapper extends Mapper<LongWritable, Text, Text, LongWritable> {
+        @Override
+        public void map(LongWritable key, Text value, Context context)
+                throws IOException, InterruptedException {
+            String line = value.toString();
+            if (line.startsWith("country_or_area;year;comm_code")) {
+                return;
+            }
+
+            String[] fields = line.split(";");
+            if(fields[9].equals("all_commodities") || fields[8].equals("0") || fields[8].isEmpty()  || fields[6].isEmpty()){
+                System.err.println(line);
+                return;
+            }
+
+            if (
+                    fields[0].equalsIgnoreCase("Other Asia, nes") ||
+                            fields[0].equalsIgnoreCase("Belgium-Luxembourg") ||
+                            fields[0].equalsIgnoreCase("EU-28")
+            ) {
+                return;
+            }
+
+            if (fields.length <11) {
+                if (fields[0].equals("Brazil") && fields[1].equals("2016")) {
+                    try {
+                        String valueStr = fields[5].trim();
+                        long numericValue = Long.parseLong(valueStr);
+                        context.write(new Text("X"), new LongWritable(numericValue));
+                    } catch (NumberFormatException e) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    public static class MINMAXBrazilReducer extends Reducer<Text, LongWritable, Text, LongWritable> {
+        @Override
+        public void reduce(Text key, Iterable<LongWritable> values, Context context)
+                throws IOException, InterruptedException {
+            long min = Long.MAX_VALUE;
+            long max = Long.MIN_VALUE;
+
+            for (LongWritable value : values) {
+                long currentValue = value.get();
+                min = Math.min(min, currentValue);
+                max = Math.max(max, currentValue);
+            }
+
+            context.write(new Text("cheapest_transaction"), new LongWritable(min));
+            context.write(new Text("most_expensive_transaction"), new LongWritable(max));
+        }
+    }
+}

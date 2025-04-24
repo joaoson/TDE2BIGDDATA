@@ -1,0 +1,4 @@
+Export	2598857
+Import	4443397
+Re-Export	327973
+Re-Import	142260
